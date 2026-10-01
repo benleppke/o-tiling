@@ -5,6 +5,7 @@ import GLib from 'gi://GLib';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import * as log from './utils/log.js';
+import { LONE_WINDOW_WIDTH_MODES } from './system/settings.js';
 import { applyThemeConsistency, restoreGtkDefaults } from './ui/theme_consistency/apply.js';
 
 export default class OTilingPreferences extends ExtensionPreferences {
@@ -66,6 +67,74 @@ export default class OTilingPreferences extends ExtensionPreferences {
             const idx = Math.max(0, placementValues.indexOf(settings.get_string('new-window-placement')));
             if (placementRow.selected !== idx) placementRow.set_selected(idx);
         });
+
+        // --- Centered Lone Window ---
+        const loneWindow = new Adw.SwitchRow({
+            title: _('Center Lone Window'),
+            subtitle: _('Center a workspace holding a single window and limit its width'),
+        });
+        tilingGroup.add(loneWindow);
+        settings.bind('lone-window-enabled', loneWindow as any, 'active', Gio.SettingsBindFlags.DEFAULT);
+
+        const loneModeRow = new Adw.ComboRow({
+            title: _('Lone Window Width'),
+            subtitle: _('Percentage of the screen or a fixed pixel width'),
+            model: Gtk.StringList.new([_('Percent of Screen'), _('Fixed Pixels')]),
+        });
+        tilingGroup.add(loneModeRow);
+
+        const lonePercent = new Adw.SpinRow({
+            title: _('Width (%)'),
+            subtitle: _('Percentage of the screen the window takes up (0 uses the minimum width)'),
+            adjustment: new Gtk.Adjustment({ lower: 0, upper: 100, step_increment: 5 }),
+        });
+        tilingGroup.add(lonePercent);
+        settings.bind('lone-window-percent', lonePercent as any, 'value', Gio.SettingsBindFlags.DEFAULT);
+
+        const lonePixels = new Adw.SpinRow({
+            title: _('Width (px)'),
+            subtitle: _('Fixed width for the window, regardless of screen size'),
+            adjustment: new Gtk.Adjustment({ lower: 200, upper: 10000, step_increment: 50 }),
+        });
+        tilingGroup.add(lonePixels);
+        settings.bind('lone-window-pixels', lonePixels as any, 'value', Gio.SettingsBindFlags.DEFAULT);
+
+        const loneMinWidth = new Adw.SpinRow({
+            title: _('Minimum Width'),
+            subtitle: _('Lone windows stay at least this wide, even when you drag them narrower'),
+            adjustment: new Gtk.Adjustment({ lower: 200, upper: 4000, step_increment: 50 }),
+        });
+        tilingGroup.add(loneMinWidth);
+        settings.bind('lone-window-min-width', loneMinWidth as any, 'value', Gio.SettingsBindFlags.DEFAULT);
+
+        const loneModes = LONE_WINDOW_WIDTH_MODES;
+        const currentLoneMode = () => loneModes[loneModeRow.selected] ?? 'percent';
+
+        loneModeRow.set_selected(Math.max(0, loneModes.indexOf(settings.get_string('lone-window-width-mode'))));
+        loneModeRow.connect('notify::selected', () => {
+            settings.set_string('lone-window-width-mode', currentLoneMode());
+        });
+        settings.connect('changed::lone-window-width-mode', () => {
+            const idx = Math.max(0, loneModes.indexOf(settings.get_string('lone-window-width-mode')));
+            if (loneModeRow.selected !== idx) loneModeRow.selected = idx;
+        });
+
+        /** Show the width rows only while the toggle is on, and only the row for the active mode. */
+        const updateLoneVisibility = () => {
+            const active = loneWindow.active;
+            const mode = currentLoneMode();
+
+            loneModeRow.visible = active;
+            lonePercent.visible = active && mode === 'percent';
+            lonePixels.visible = active && mode === 'pixels';
+            loneMinWidth.visible = active;
+        };
+
+        loneWindow.connect('notify::active', updateLoneVisibility);
+        loneModeRow.connect('notify::selected', updateLoneVisibility);
+        settings.connect('changed::lone-window-enabled', updateLoneVisibility);
+
+        updateLoneVisibility();
 
         const appearancePage = new Adw.PreferencesPage({
             title: _('Appearance'),

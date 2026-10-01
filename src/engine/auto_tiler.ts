@@ -90,33 +90,9 @@ export class AutoTiler {
         this.tile(ext, b_fork, b_fork.area);
     }
 
-    update_toplevel(ext: Ext, fork: Fork, monitor: number, smart_gaps: boolean) {
+    /** The work area of a monitor, inset by the outer gaps unless `smart_gaps` is in play. */
+    private toplevel_area(ext: Ext, monitor: number, smart_gaps: boolean) {
         const rect = ext.monitor_work_area(monitor);
-
-        fork.smart_gapped = smart_gaps && fork.right === null;
-
-        if (!fork.smart_gapped) {
-            rect.x += ext.gap_outer;
-            rect.y += ext.gap_top;
-            rect.width -= ext.gap_outer * 2;
-            rect.height -= ext.gap_outer + ext.gap_top;
-        }
-
-        if (fork.left.inner.kind === 2) {
-            const win = ext.windows.get(fork.left.inner.entity);
-            if (win) {
-                win.smart_gapped = fork.smart_gapped;
-            }
-        }
-
-        fork.area = fork.set_area(rect.clone());
-        fork.length_left = Math.round(fork.prev_ratio * fork.length());
-        this.tile(ext, fork, fork.area);
-    }
-
-    /** Attaches `win` to an optionally-given monitor */
-    attach_to_monitor(ext: Ext, win: ShellWindow, workspace_id: [number, number], smart_gaps: boolean) {
-        const rect = ext.monitor_work_area(workspace_id[0]);
 
         if (!smart_gaps) {
             rect.x += ext.gap_outer;
@@ -125,10 +101,41 @@ export class AutoTiler {
             rect.height -= ext.gap_outer + ext.gap_top;
         }
 
+        return rect;
+    }
+
+    /** Re-derives a toplevel fork's area and lone-window width from the current monitor geometry. */
+    private refresh_toplevel(ext: Ext, fork: Fork, monitor: number, smart_gaps: boolean) {
+        fork.area = fork.set_area(this.toplevel_area(ext, monitor, smart_gaps));
+        fork.lone_width = fork.right === null ? ext.settings.lone_width(fork.area.width) : 0;
+    }
+
+    update_toplevel(ext: Ext, fork: Fork, monitor: number, smart_gaps: boolean) {
+        fork.smart_gapped = smart_gaps && fork.right === null;
+
+        if (fork.left.inner.kind === 2) {
+            const win = ext.windows.get(fork.left.inner.entity);
+            if (win) {
+                win.smart_gapped = fork.smart_gapped;
+            }
+        }
+
+        this.refresh_toplevel(ext, fork, monitor, fork.smart_gapped);
+
+        fork.length_left = Math.round(fork.prev_ratio * fork.length());
+        this.tile(ext, fork, fork.area);
+    }
+
+    /** Attaches `win` to an optionally-given monitor */
+    attach_to_monitor(ext: Ext, win: ShellWindow, workspace_id: [number, number], smart_gaps: boolean) {
+        const rect = this.toplevel_area(ext, workspace_id[0], smart_gaps);
+
         const [entity, fork] = this.forest.create_toplevel(win.entity, rect.clone(), workspace_id);
         this.forest.on_attach(entity, win.entity);
         fork.smart_gapped = smart_gaps;
         win.smart_gapped = smart_gaps;
+
+        fork.lone_width = ext.settings.lone_width(fork.area.width);
 
         this.tile(ext, fork, rect);
     }
@@ -252,10 +259,14 @@ export class AutoTiler {
 
             if (reflow_fork) {
                 const fork = reflow_fork[1];
-                if (fork.is_toplevel && ext.settings.smart_gaps() && fork.right === null) {
-                    const rect = ext.monitor_work_area(fork.monitor);
-                    fork.set_area(rect);
-                    fork.smart_gapped = true;
+                if (fork.is_toplevel && fork.right === null) {
+                    if (ext.settings.smart_gaps()) {
+                        fork.set_area(ext.monitor_work_area(fork.monitor));
+                        fork.smart_gapped = true;
+                    }
+
+                    // One window again: restore the configured width, not a dragged one.
+                    fork.lone_width = ext.settings.lone_width(fork.area.width);
                 }
 
                 this.tile(ext, fork, fork.area);

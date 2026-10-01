@@ -69,7 +69,7 @@ export let indicator: Indicator | null = null;
 export let workspace_number_indicator: WorkspaceNumberIndicator | null = null;
 export let quick_settings_indicator: any = null;
 
-const { cursor_rect, is_keyboard_op, is_resize_op, is_move_op } = Lib;
+const { cursor_rect, is_keyboard_op, is_resize_op, is_move_op, is_horizontal_resize_op } = Lib;
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 const {
     layoutManager,
@@ -172,6 +172,9 @@ export class Ext extends Ecs.System<ExtEvent> {
     gap_top: number = 0;
 
     grab_op: GrabOp.GrabOp | null = null; // Information about a current possible grab operation
+
+    /** Live re-centering handler for a lone window being edge-dragged, torn down with the grab. */
+    lone_resize_signal: null | [any, SignalID] = null;
 
     ignore_display_update: boolean = false; // A display config update is triggered on a workspace addition
 
@@ -1727,6 +1730,21 @@ export class Ext extends Ecs.System<ExtEvent> {
                             crect.y -= tab_dimension;
                         }
 
+                        // A lone, width-constrained window just takes the dragged width; both
+                        // edges work. Vertical and corner drags deliberately fall through to the
+                        // normal resize path, which snaps the height back.
+                        if (
+                            fork.is_toplevel &&
+                            fork.right === null &&
+                            fork.lone_width > 0 &&
+                            is_horizontal_resize_op(op)
+                        ) {
+                            crect.clamp(fork.area);
+                            forest.resize_lone(this, fork, crect);
+                            forest.arrange(this, fork.workspace);
+                            return;
+                        }
+
                         const top_level = forest.find_toplevel(this.workspace_id());
                         if (top_level) {
                             crect.clamp((forest.forks.get(top_level) as Fork).area);
@@ -1983,6 +2001,39 @@ export class Ext extends Ecs.System<ExtEvent> {
         if (this.auto_tiler) this.restack();
     }
 
+    /** Keeps a lone window centered while its edge is dragged. Torn down in `unset_grab_op`. */
+    private track_lone_resize(entity: Ecs.Entity, op: any) {
+        if (!this.auto_tiler) return;
+
+        // Lone sizing only models width, so it can only track a left/right drag. Vertical, corner
+        // and keyboard resizes leave the model unable to describe what's on screen, so they fall
+        // through to the normal path, which snaps the height back on drop. Overview drags never
+        // move the real window.
+        if (op === undefined || overview.visible || !is_horizontal_resize_op(op)) return;
+
+        const fork = this.auto_tiler.get_parent_fork(entity);
+        if (!fork || !fork.is_toplevel || fork.right !== null || fork.lone_width <= 0) return;
+
+        const win = this.windows.get(entity);
+        if (!win) return;
+
+        const forest = this.auto_tiler.forest;
+
+        this.lone_resize_signal = [
+            win.meta,
+            win.meta.connect('size-changed', () => {
+                const current = this.auto_tiler?.get_parent_fork(entity);
+
+                if (!this.grab_op || !Ecs.entity_eq(this.grab_op.entity, entity) || !current) return false;
+
+                forest.resize_lone(this, current, win.rect());
+                forest.arrange(this, current.workspace);
+
+                return false;
+            }),
+        ];
+    }
+
     /** Triggered when a grab operation has been started */
     on_grab_start(meta: null | Meta.Window, op: any) {
         if (!meta) return;
@@ -1999,6 +2050,8 @@ export class Ext extends Ecs.System<ExtEvent> {
                 this.grab_op = new GrabOp.GrabOp(entity, rect);
 
                 this.size_signals_block(win);
+
+                this.track_lone_resize(entity, op);
 
                 /** Display an overlay indicating where the window will be placed if dropped */
 
@@ -2276,14 +2329,16 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
     }
 
+    /** Re-tile lone toplevel forks so a changed gap or lone-window width setting applies now.
+     *  Only forks with a single window can change width, so split forks are left alone. */
     on_smart_gap() {
-        if (this.auto_tiler) {
-            const smart_gaps = this.settings.smart_gaps();
-            for (const [entity, [mon]] of this.auto_tiler.forest.toplevel.values()) {
-                const node = this.auto_tiler.forest.forks.get(entity);
-                if (node?.right === null) {
-                    this.auto_tiler.update_toplevel(this, node, mon, smart_gaps);
-                }
+        if (!this.auto_tiler) return;
+
+        const smart_gaps = this.settings.smart_gaps();
+        for (const [entity, [mon]] of this.auto_tiler.forest.toplevel.values()) {
+            const fork = this.auto_tiler.forest.forks.get(entity);
+            if (fork?.right === null) {
+                this.auto_tiler.update_toplevel(this, fork, mon, smart_gaps);
             }
         }
     }
@@ -2623,6 +2678,13 @@ export class Ext extends Ecs.System<ExtEvent> {
                     } else {
                         _hide_skip_taskbar_windows();
                     }
+                    break;
+                case 'lone-window-enabled':
+                case 'lone-window-width-mode':
+                case 'lone-window-percent':
+                case 'lone-window-pixels':
+                case 'lone-window-min-width':
+                    this.on_smart_gap();
                     break;
 
             }
@@ -3361,6 +3423,11 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     unset_grab_op() {
+        if (this.lone_resize_signal) {
+            this.lone_resize_signal[0].disconnect(this.lone_resize_signal[1]);
+            this.lone_resize_signal = null;
+        }
+
         if (this._timeouts['drag_signal'] != null) {
             this.hide_drag_hint();
             utils.source_remove(this._timeouts['drag_signal']);
@@ -3821,6 +3888,11 @@ export default class OTilingExtension extends Extension {
             _show_skip_taskbar_windows(ext);
         } else {
             _hide_skip_taskbar_windows();
+        }
+
+        const rejected_lone_mode = ext.settings.sanitize_lone_window_width_mode();
+        if (rejected_lone_mode !== null) {
+            log.error(`unknown lone-window-width-mode '${rejected_lone_mode}', using 'percent'`);
         }
 
         ext.injections_add();

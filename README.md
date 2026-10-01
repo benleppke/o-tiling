@@ -156,6 +156,10 @@ Choose where a new window attaches in the tiling tree: next to the Active Window
 
 Floating (untiled) windows snap to an invisible grid while you drag or resize them, so manual layouts still line up cleanly.
 
+### Centered Lone Window
+
+Center a lone tiled window on a workspace and limit its width to improve readability on ultrawide aspect ratios. Drag window edges to resize, or set a max width for lone windows in the settings.
+
 ### Mouse-Driven Options
 
 - Mouse cursor follows active window: automatically warps the pointer to whichever window just gained focus.
