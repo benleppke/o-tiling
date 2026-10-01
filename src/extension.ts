@@ -153,7 +153,7 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     drag_signal: null | SignalID = null;
 
-    exception_selecting: boolean = false; // If set, the user is currently selecting a window to add to floating exceptions
+    exception_selecting: null | 'float' | 'lone' = null; // Non-null while the user is picking a window to add to an exceptions list
     gap_inner: number = 0; // The number of pixels between windows
 
     gap_inner_half: number = 0; // Exactly half of the value of the inner gap
@@ -487,6 +487,14 @@ export class Ext extends Ecs.System<ExtEvent> {
             const target = this.windows.get(win);
             // D-Bus input: caller may reference a window that already closed
             if (target) target.meta.delete(Clutter.get_current_event_time());
+        };
+
+        this.dbus.OpenExceptionsDialog = (lone: boolean) => {
+            if (lone) {
+                this.lone_exception_dialog();
+            } else {
+                this.exception_dialog();
+            }
         };
     }
 
@@ -867,7 +875,7 @@ export class Ext extends Ecs.System<ExtEvent> {
     }
 
     exception_add(win: Window.ShellWindow) {
-        this.exception_selecting = false;
+        this.exception_selecting = null;
         let d = new add_exception.AddExceptionDialog(
             // Cancel
             () => this.exception_dialog(),
@@ -897,20 +905,48 @@ export class Ext extends Ecs.System<ExtEvent> {
         d.open();
     }
 
-    exception_dialog() {
-        let path = get_current_path() + '/floating_exceptions/main.js';
+    lone_exception_add(win: Window.ShellWindow) {
+        this.exception_selecting = null;
+        let d = new add_exception.AddExceptionDialog(
+            // Cancel
+            () => this.lone_exception_dialog(),
+            // this_app
+            () => {
+                let wmclass = win.meta.get_wm_class();
+                if (wmclass !== null && wmclass.length === 0) {
+                    wmclass = win.name(this);
+                }
 
+                if (wmclass) this.conf.add_lone_app_exception(wmclass);
+                this.lone_exception_dialog();
+            },
+            // current-window
+            () => {
+                let wmclass = win.meta.get_wm_class();
+                if (wmclass) this.conf.add_lone_window_exception(wmclass, win.title());
+                this.lone_exception_dialog();
+            },
+            // Reload the tiling config and re-tile lone workspaces on dialog close
+            () => {
+                this.conf.reload().then(() => {
+                    this.tiling_config_reapply();
+                    this.on_smart_gap();
+                }).catch((e: any) => log.error(e));
+            },
+            { title: 'Add Lone Window Exception', description: 'Fill the screen with the selected window or all windows from the application.' },
+        );
+        d.open();
+    }
+
+    /** Opens a standalone exception-manager app and routes its SELECT/MODIFIED stdout lines. */
+    exception_manager(path: string, on_modified: () => void, on_select: () => void) {
         const event_handler = (event: string): boolean => {
             switch (event) {
                 case 'MODIFIED':
-                    this.register_fn(() => {
-                        this.conf.reload().then(() => {
-                            this.tiling_config_reapply();
-                        }).catch((e: any) => log.error(e));
-                    });
+                    this.register_fn(on_modified);
                     break;
                 case 'SELECT':
-                    this.register_fn(() => this.exception_select());
+                    this.register_fn(on_select);
                     return false;
             }
 
@@ -929,7 +965,7 @@ export class Ext extends Ecs.System<ExtEvent> {
                         }
                     }
                 } catch (why) {
-                    log.error(`failed to read response from floating exceptions dialog: ${why}`);
+                    log.error(`failed to read response from exceptions dialog: ${why}`);
                 }
             };
 
@@ -937,13 +973,36 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
     }
 
+    exception_dialog() {
+        this.exception_manager(
+            get_current_path() + '/floating_exceptions/main.js',
+            () => {
+                this.conf.reload().then(() => {
+                    this.tiling_config_reapply();
+                }).catch((e: any) => log.error(e));
+            },
+            () => this.exception_select('float'),
+        );
+    }
 
-    exception_select() {
+    lone_exception_dialog() {
+        this.exception_manager(
+            get_current_path() + '/lone_exceptions/main.js',
+            () => {
+                this.conf.reload().then(() => {
+                    this.on_smart_gap();
+                }).catch((e: any) => log.error(e));
+            },
+            () => this.exception_select('lone'),
+        );
+    }
+
+    exception_select(mode: 'float' | 'lone' = 'float') {
         if (this._timeouts['exception_select_timeout'] != null) {
             utils.source_remove(this._timeouts['exception_select_timeout']);
         }
         const id = GLib.timeout_add(GLib.PRIORITY_LOW, 500, () => {
-            this.exception_selecting = true;
+            this.exception_selecting = mode;
             (Main as any).overview.show();
             if (this._timeouts['exception_select_timeout'] === id) {
                 this._timeouts['exception_select_timeout'] = null;
@@ -1356,7 +1415,11 @@ export class Ext extends Ecs.System<ExtEvent> {
         this.size_signals_unblock(win);
 
         if (this.exception_selecting) {
-            this.exception_add(win);
+            if (this.exception_selecting === 'lone') {
+                this.lone_exception_add(win);
+            } else {
+                this.exception_add(win);
+            }
         }
 
         // Track history of focused windows, but do not permit duplicates.

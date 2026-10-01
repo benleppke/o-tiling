@@ -18,6 +18,9 @@ const IFACE: string = `<node>
     <method name="WindowQuit">
         <arg type="(uu)" direction="in" name="window"/>
     </method>
+    <method name="OpenExceptionsDialog">
+        <arg type="b" direction="in" name="lone"/>
+    </method>
   </interface>
 </node>`;
 
@@ -33,6 +36,7 @@ export class Service {
     WindowHighlight: (window: [number, number]) => void = () => {};
     WindowList: () => Array<[[number, number], string, string, string]> = () => [];
     WindowQuit: (window: [number, number]) => void = () => {};
+    OpenExceptionsDialog: (lone: boolean) => void = () => {};
 
     constructor() {
         this.dbus = Gio.DBusExportedObject.wrapJSObject(IFACE, this);

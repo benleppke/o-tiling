@@ -104,10 +104,45 @@ export class AutoTiler {
         return rect;
     }
 
+    /** Whether any window in a lone tile is exempted from lone-window centering. */
+    private tile_has_lone_exception(ext: Ext, fork: Fork): boolean {
+        const check = (win: ShellWindow): boolean => {
+            const wm_class = win.meta.get_wm_class();
+            const wm_title = win.meta.get_title();
+
+            return wm_class !== null && wm_title !== null && ext.conf.window_is_lone_exception(wm_class, wm_title);
+        };
+
+        const inner = fork.left.inner;
+        if (inner.kind === 2) {
+            const win = ext.windows.get(inner.entity);
+            return win !== null && check(win);
+        }
+
+        if (inner.kind === 3) {
+            for (const entity of inner.entities) {
+                const win = ext.windows.get(entity);
+                if (win && check(win)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Pixel width for a lone toplevel fork, or 0 to fill: the configured value, unless a window in
+     *  the tile is exempted via the lone-window exceptions list. */
+    lone_width_for(ext: Ext, fork: Fork): number {
+        const width = ext.settings.lone_width(fork.area.width);
+
+        if (width === 0 || this.tile_has_lone_exception(ext, fork)) return 0;
+
+        return width;
+    }
+
     /** Re-derives a toplevel fork's area and lone-window width from the current monitor geometry. */
     private refresh_toplevel(ext: Ext, fork: Fork, monitor: number, smart_gaps: boolean) {
         fork.area = fork.set_area(this.toplevel_area(ext, monitor, smart_gaps));
-        fork.lone_width = fork.right === null ? ext.settings.lone_width(fork.area.width) : 0;
+        fork.lone_width = fork.right === null ? this.lone_width_for(ext, fork) : 0;
     }
 
     update_toplevel(ext: Ext, fork: Fork, monitor: number, smart_gaps: boolean) {
@@ -135,7 +170,7 @@ export class AutoTiler {
         fork.smart_gapped = smart_gaps;
         win.smart_gapped = smart_gaps;
 
-        fork.lone_width = ext.settings.lone_width(fork.area.width);
+        fork.lone_width = this.lone_width_for(ext, fork);
 
         this.tile(ext, fork, rect);
     }
@@ -266,7 +301,7 @@ export class AutoTiler {
                     }
 
                     // One window again: restore the configured width, not a dragged one.
-                    fork.lone_width = ext.settings.lone_width(fork.area.width);
+                    fork.lone_width = this.lone_width_for(ext, fork);
                 }
 
                 this.tile(ext, fork, fork.area);

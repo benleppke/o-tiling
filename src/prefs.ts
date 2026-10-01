@@ -76,6 +76,34 @@ export default class OTilingPreferences extends ExtensionPreferences {
         tilingGroup.add(loneWindow);
         settings.bind('lone-window-enabled', loneWindow as any, 'active', Gio.SettingsBindFlags.DEFAULT);
 
+        const loneExceptionsRow = new Adw.ActionRow({
+            title: _('Lone Window Exceptions…'),
+            subtitle: _('Apps or individual windows to keep at full width when alone on a workspace'),
+            activatable: true,
+        });
+        loneExceptionsRow.add_suffix(new Gtk.Image({
+            icon_name: 'go-next-symbolic',
+            valign: Gtk.Align.CENTER,
+        }));
+        loneExceptionsRow.connect('activated', () => {
+            // The manager app runs in the shell extension; ask it to open via the session bus.
+            try {
+                Gio.DBus.session.call_sync(
+                    'org.gnome.shell.extensions.OTiling',
+                    '/org/gnome/shell/extensions/OTiling',
+                    'org.gnome.shell.extensions.OTiling',
+                    'OpenExceptionsDialog',
+                    new GLib.Variant('(b)', [true]),
+                    null,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    null,
+                );
+            } catch (e) {
+                log.debug(`lone window exceptions: extension not reachable: ${e}`);
+            }
+        });
+
         const loneModeRow = new Adw.ComboRow({
             title: _('Lone Window Width'),
             subtitle: _('Percentage of the screen or a fixed pixel width'),
@@ -106,6 +134,7 @@ export default class OTilingPreferences extends ExtensionPreferences {
         });
         tilingGroup.add(loneMinWidth);
         settings.bind('lone-window-min-width', loneMinWidth as any, 'value', Gio.SettingsBindFlags.DEFAULT);
+        tilingGroup.add(loneExceptionsRow);
 
         const loneModes = LONE_WINDOW_WIDTH_MODES;
         const currentLoneMode = () => loneModes[loneModeRow.selected] ?? 'percent';
@@ -128,6 +157,7 @@ export default class OTilingPreferences extends ExtensionPreferences {
             lonePercent.visible = active && mode === 'percent';
             lonePixels.visible = active && mode === 'pixels';
             loneMinWidth.visible = active;
+            loneExceptionsRow.visible = active;
         };
 
         loneWindow.connect('notify::active', updateLoneVisibility);
