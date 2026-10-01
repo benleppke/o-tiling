@@ -216,6 +216,18 @@
             <summary>Narrowest a centered lone window may ever be, whether from the setting or from dragging, in pixels</summary>
         </key>
 
+        <key type="as" name="lone-window-excluded-displays">
+            <default>[]</default>
+            <summary>Displays (by connector, e.g. 'eDP-1') where lone windows are not centered</summary>
+        </key>
+
+        <key type="s" name="lone-window-display-registry">
+            <default>'{}'</default>
+            <!-- Every display ever seen, keyed by connector, so per-display settings survive
+                 replug. Maintained by the extension, edited by the preferences UI. -->
+            <summary>Per-display lone-window centering settings, keyed by connector</summary>
+        </key>
+
         <!-- Focus Shifting - Using Super+Alt+Arrows and Super+h/j/k/l to avoid GNOME conflicts -->
         <key type="as" name="focus-left">
             <default><![CDATA[['<Super><Alt>Left','<Super>h']]]></default>

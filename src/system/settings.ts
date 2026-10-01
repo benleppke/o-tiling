@@ -5,6 +5,20 @@ import * as utils from '../utils/utils.js';
 
 const DARK = ['dark', 'adapta', 'plata', 'dracula'];
 
+/** A display as GNOME's Displays panel knows it. `name` is GNOME's own label for the display
+ *  (e.g. 'Dell Inc. 34"', 'LG UltraFine 32"'). `connector` is the stable key that survives
+ *  unplug/replug. Remembered displays carry `connected: false` so the UI can gray them out. */
+export interface DisplayInfo {
+    connector: string;
+    name: string;
+    resolution: string;
+    builtin: boolean;
+    connected?: boolean;
+}
+
+/** Registry of every display ever seen, keyed by connector. */
+export type DisplayRegistry = Record<string, DisplayInfo>;
+
 const ACCENT_COLOR_MAP: Record<string, string> = {
     'blue': 'rgba(53, 132, 228, 1)',
     'teal': 'rgba(33, 144, 175, 1)',
@@ -91,6 +105,8 @@ const LONE_WINDOW_PIXELS = 'lone-window-pixels';
 /** The width modes lone sizing understands. Any other stored value makes `lone_width` fall
  *  through to 'fill', so a stale or hand-edited one is repaired on startup. */
 export const LONE_WINDOW_WIDTH_MODES = ['percent', 'pixels'];
+const LONE_WINDOW_EXCLUDED_DISPLAYS = 'lone-window-excluded-displays';
+const LONE_WINDOW_DISPLAY_REGISTRY = 'lone-window-display-registry';
 const LONE_WINDOW_MIN_WIDTH = 'lone-window-min-width';
 const ACTIVE_HINT_OVERLAY_ENABLED = 'active-hint-overlay-enabled';
 const ACTIVE_HINT_OVERLAY_OPACITY = 'active-hint-overlay-opacity';
@@ -285,6 +301,27 @@ export class ExtensionSettings {
 
     lone_window_min_width(): number {
         return this.ext.get_uint(LONE_WINDOW_MIN_WIDTH);
+    }
+
+    lone_window_excluded_displays(): string[] {
+        return this.ext.get_strv(LONE_WINDOW_EXCLUDED_DISPLAYS);
+    }
+
+    /** Every display ever seen, keyed by connector. Includes displays that are currently
+     *  disconnected (flagged `connected: false`) so their per-display settings can be managed. */
+    lone_window_display_registry(): DisplayRegistry {
+        const raw = this.ext.get_string(LONE_WINDOW_DISPLAY_REGISTRY);
+
+        try {
+            const parsed = JSON.parse(raw || '{}');
+
+            // Tolerate a malformed/legacy value by starting from an empty registry.
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+
+            return parsed as DisplayRegistry;
+        } catch {
+            return {};
+        }
     }
 
     /** Rewrites an unrecognised stored width mode to the default. Returns the rejected value so
@@ -546,6 +583,19 @@ export class ExtensionSettings {
 
     set_lone_window_min_width(set: number) {
         this.ext.set_uint(LONE_WINDOW_MIN_WIDTH, set);
+    }
+
+    set_lone_window_excluded_displays(set: string[]) {
+        this.ext.set_strv(LONE_WINDOW_EXCLUDED_DISPLAYS, set);
+    }
+
+    set_lone_window_display_registry(registry: DisplayRegistry) {
+        const json = JSON.stringify(registry);
+
+        // Skip no-op writes so monitor reconciliations don't churn dconf or signal the UI.
+        if (json === this.ext.get_string(LONE_WINDOW_DISPLAY_REGISTRY)) return;
+
+        this.ext.set_string(LONE_WINDOW_DISPLAY_REGISTRY, json);
     }
 
     set_active_hint_overlay_enabled(set: boolean) {

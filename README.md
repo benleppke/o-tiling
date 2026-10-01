@@ -158,7 +158,7 @@ Floating (untiled) windows snap to an invisible grid while you drag or resize th
 
 ### Centered Lone Window
 
-Center a lone tiled window on a workspace and limit its width to improve readability on ultrawide aspect ratios. Drag window edges to resize, or set a max width for lone windows in the settings. Apps that should keep filling the screen can be added under Lone Window Exceptions.
+Center lone windows and cap their width for readable layouts on ultrawide screens, with per-app and per-display exceptions.
 
 ### Mouse-Driven Options
 

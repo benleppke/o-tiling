@@ -130,11 +130,16 @@ export class AutoTiler {
     }
 
     /** Pixel width for a lone toplevel fork, or 0 to fill: the configured value, unless a window in
-     *  the tile is exempted via the lone-window exceptions list. */
+     *  the tile is exempted via the lone-window exceptions list, or the display is excluded. */
     lone_width_for(ext: Ext, fork: Fork): number {
         const width = ext.settings.lone_width(fork.area.width);
 
-        if (width === 0 || this.tile_has_lone_exception(ext, fork)) return 0;
+        if (width === 0) return 0;
+
+        const connector = ext.monitor_connector(fork.monitor);
+        if (connector !== null && ext.settings.lone_window_excluded_displays().includes(connector)) return 0;
+
+        if (this.tile_has_lone_exception(ext, fork)) return 0;
 
         return width;
     }

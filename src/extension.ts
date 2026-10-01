@@ -30,6 +30,7 @@ import * as scheduler from './system/scheduler.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import type { Entity } from './core/ecs.js';
 import type { ExtEvent } from './core/events.js';
+import type { DisplayInfo } from './system/settings.js';
 import { Rectangle } from './utils/rectangle.js';
 import type { Indicator } from './ui/panel_settings.js';
 import type { WorkspaceNumberIndicator } from './ui/panel_settings.js';
@@ -310,6 +311,7 @@ export class Ext extends Ecs.System<ExtEvent> {
         load_theme();
 
         this.conf.reload().catch((e: any) => log.error(e));
+        this.update_lone_window_displays();
 
         if (this.settings.int) {
             const id1 = this.settings.int.connect("changed::gtk-theme", () => {
@@ -495,6 +497,12 @@ export class Ext extends Ecs.System<ExtEvent> {
             } else {
                 this.exception_dialog();
             }
+        };
+
+        // The preferences UI calls this after editing the display registry so connected displays
+        // are re-scanned and re-added immediately, rather than only on the next monitor event.
+        this.dbus.SyncDisplays = () => {
+            this.update_lone_window_displays();
         };
     }
 
@@ -1203,6 +1211,99 @@ export class Ext extends Ecs.System<ExtEvent> {
         const lm = mm ? mm.get_logical_monitors().find((m: any) => m.get_number() === monitor) : null;
         const rect = lm ? { x: lm.x, y: lm.y, width: lm.width, height: lm.height } : null;
         return rect ? Rect.Rectangle.from_meta(rect as any) : null;
+    }
+
+    /** Resolves a logical monitor index to its physical `Meta.Monitor`, or null.
+     *
+     * A logical monitor (the index carried by `fork.monitor` / `MetaWindow.get_monitor()`) wraps
+     * one or more physical monitors; the first is the one GNOME's Displays panel names. The
+     * logical monitor's `get_number()` is exactly the index the tiling engine uses, so this is the
+     * authoritative logical→physical bridge. Guarded so a mutter version lacking these methods can
+     * never break enabling.
+     */
+    monitor_meta_monitor(monitor: number): any | null {
+        try {
+            const mm = (global as any).backend.get_monitor_manager();
+            if (!mm || typeof mm.get_logical_monitors !== 'function') return null;
+
+            const lm = mm.get_logical_monitors().find((m: any) => m && m.get_number() === monitor);
+            if (!lm || typeof lm.get_monitors !== 'function') return null;
+
+            return lm.get_monitors()[0] ?? null;
+        } catch (e) {
+            log.error(`monitor_meta_monitor: ${e}`);
+            return null;
+        }
+    }
+
+    /** GNOME's own label for a display (e.g. 'Dell Inc. 34"', 'LG UltraFine 32"'), falling
+     *  back to vendor/product when the EDID yields no display name, then to the connector. */
+    private monitor_display_name(mm_mon: any, connector: string): string {
+        const name = mm_mon && typeof mm_mon.get_display_name === 'function' ? mm_mon.get_display_name() : null;
+        if (typeof name === 'string' && name.length > 0) return name;
+
+        const vendor = mm_mon && typeof mm_mon.get_vendor === 'function' ? mm_mon.get_vendor() : null;
+        const product = mm_mon && typeof mm_mon.get_product === 'function' ? mm_mon.get_product() : null;
+        if (product) return vendor ? `${vendor} ${product}` : product;
+        if (vendor) return vendor;
+
+        return connector;
+    }
+
+    /** Full display description for a logical monitor, or null if the monitor is gone. */
+    monitor_info(monitor: number): DisplayInfo | null {
+        const mm_mon = this.monitor_meta_monitor(monitor);
+
+        // Geometry from the shell monitor, which is always present for a live index.
+        const mon = Main.layoutManager.monitors[monitor];
+        if (!mon) return null;
+
+        const raw_connector = mm_mon && typeof mm_mon.get_connector === 'function' ? mm_mon.get_connector() : null;
+        const connector = typeof raw_connector === 'string' && raw_connector.length > 0
+            ? raw_connector
+            : `monitor-${monitor}`;
+
+        return {
+            connector: connector,
+            name: this.monitor_display_name(mm_mon, connector),
+            resolution: `${(mon as any).width} × ${(mon as any).height}`,
+            builtin: mm_mon && typeof mm_mon.is_builtin === 'function' ? mm_mon.is_builtin() : false,
+        };
+    }
+
+    /** Connector name of a logical monitor (e.g. 'eDP-1', 'DP-2'), stable across reconnects.
+     *  Falls back to a stable synthetic name so the preferences toggles and the tiling engine
+     *  always agree, even when the physical-monitor API is unavailable. */
+    monitor_connector(monitor: number): string | null {
+        return this.monitor_info(monitor)?.connector ?? null;
+    }
+
+    /** Reconciles the known-display registry with what is actually connected and stores it.
+     *
+     * The registry accumulates displays over time (keyed by connector) so the preferences UI can
+     * list — and let the user toggle or forget — displays that are not currently plugged in.
+     * Called on enable and on every display-configuration change. Guarded so a failure here can
+     * never stop the extension from enabling.
+     */
+    update_lone_window_displays() {
+        try {
+            const registry = this.settings.lone_window_display_registry();
+
+            // Mark everything currently remembered as disconnected; live ones get re-flagged below.
+            for (const entry of Object.values(registry)) entry.connected = false;
+
+            for (let i = 0; i < Main.layoutManager.monitors.length; i++) {
+                const info = this.monitor_info(i);
+                if (!info) continue;
+
+                // A live monitor's name/resolution/builtin are always fresh.
+                registry[info.connector] = { ...info, connected: true };
+            }
+
+            this.settings.set_lone_window_display_registry(registry);
+        } catch (e) {
+            log.error(`update_lone_window_displays: ${e}`);
+        }
     }
 
     on_active_workspace_changed() {
@@ -2749,6 +2850,9 @@ export class Ext extends Ecs.System<ExtEvent> {
                 case 'lone-window-min-width':
                     this.on_smart_gap();
                     break;
+                case 'lone-window-excluded-displays':
+                    this.on_smart_gap();
+                    break;
 
             }
         });
@@ -3510,6 +3614,8 @@ export class Ext extends Ecs.System<ExtEvent> {
 
     update_display_configuration(workareas_only: boolean) {
         if (!this.auto_tiler || sessionMode.isLocked) return;
+
+        this.update_lone_window_displays();
 
         if (this.ignore_display_update) {
             this.ignore_display_update = false;
