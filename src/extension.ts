@@ -1504,6 +1504,35 @@ export class Ext extends Ecs.System<ExtEvent> {
         }
     }
 
+    /**
+     * Re-asserts the active hint's z-order for the currently focused window after
+     * Mutter finishes a window-stack change.
+     *
+     * Mutter only orders real window actors and is unaware of the foreign border
+     * actor, so a dropdown opened above the focused window can land between the
+     * window and its border, drawing the hint on top of the menu. This runs on
+     * `display`'s `restacked` signal — after Mutter is done ordering — so the
+     * border reliably sinks back below popups without racing their raise.
+     *
+     * Focused-window only: overlay-all mode keeps its existing behavior.
+     */
+    private reassert_focused_hint_stack() {
+        if (!this.settings.active_hint()) return;
+        if (this._bordered_entity === null) return;
+
+        const win = this.windows.get(this._bordered_entity);
+        if (!win || !win.border || !win.border.visible) return;
+
+        // Skip windows where the border is intentionally hidden.
+        if (win.meta.is_fullscreen() || win.meta.minimized) return;
+
+        const actor = win.meta.get_compositor_private() as any;
+        const parent = actor?.get_parent();
+        if (!actor || !parent) return;
+
+        win.stack_border_above_window(actor, parent, win.border);
+    }
+
     hide_all_borders(instant: boolean = false) {
         for (const window of this.windows.values()) {
             window.hide_border();
@@ -2822,6 +2851,14 @@ export class Ext extends Ecs.System<ExtEvent> {
 
         this.connect(display as any, 'window_created', (_, window: Meta.Window) => {
             this.register({ tag: 3, window });
+        });
+
+        // Mutter doesn't know about the foreign border actor, so re-assert the
+        // focused hint's stacking after every completed window-stack change (this
+        // lands after Mutter raises a newly-opened dropdown, sinking the border
+        // back below it). Cheap no-op when the active hint is off or hidden.
+        this.connect(display as any, 'restacked', () => {
+            this.reassert_focused_hint_stack();
         });
 
         // GNOME 40 removed the first argument of the callback

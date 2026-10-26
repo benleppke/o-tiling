@@ -680,69 +680,7 @@ export class ShellWindow {
             if (!parent) return GLib.SOURCE_REMOVE;
 
             this.update_border_layout();
-
-            if (border.get_parent() !== parent) {
-                if (border.get_parent()) {
-                    border.get_parent()!.remove_child(border);
-                }
-                parent.add_child(border);
-            }
-
-            parent.set_child_above_sibling(border, actor);
-
-
-            for (const above_actor of (global as any).get_window_actors()) {
-                const meta = above_actor.get_meta_window();
-                if (!meta || !meta.is_above()) continue;
-                if (above_actor !== actor && above_actor.get_parent() === parent) {
-                    parent.set_child_below_sibling(border, above_actor);
-                    break;
-                }
-            }
-
-            const siblings: Array<any> = parent.get_children();
-            const candidates: Set<any> = new Set();
-
-            for (const window of this.ext.windows.values()) {
-                const trans_parent = window.meta.get_transient_for();
-                if (!trans_parent) continue;
-                const parent_actor = trans_parent.get_compositor_private() as any;
-                if (parent_actor !== actor) continue;
-                const window_actor = window.meta.get_compositor_private() as any;
-                if (window_actor && window_actor.get_parent() === parent) {
-                    candidates.add(window_actor);
-                }
-            }
-
-            for (const popup_actor of (global as any).get_window_actors()) {
-                const wtype = popup_actor.get_meta_window()?.get_window_type();
-                if (
-                    wtype === Meta.WindowType.DROPDOWN_MENU ||
-                    wtype === Meta.WindowType.POPUP_MENU ||
-                    wtype === Meta.WindowType.COMBO ||
-                    wtype === Meta.WindowType.TOOLTIP
-                ) {
-                    if (popup_actor.get_parent() === parent) {
-                        candidates.add(popup_actor);
-                    }
-                }
-            }
-
-            if (candidates.size > 0) {
-                // Find the candidate with the lowest index among siblings (closest to bottom).
-                let lowest: any = null;
-                let lowest_idx = siblings.length;
-                for (const candidate of candidates) {
-                    const idx = siblings.indexOf(candidate);
-                    if (idx !== -1 && idx < lowest_idx) {
-                        lowest_idx = idx;
-                        lowest = candidate;
-                    }
-                }
-                if (lowest !== null) {
-                    parent.set_child_below_sibling(border, lowest);
-                }
-            }
+            this.stack_border_above_window(actor, parent, border);
 
             return GLib.SOURCE_REMOVE;
         };
@@ -755,6 +693,82 @@ export class ShellWindow {
         } else {
             id = lib.later_add(Meta.LaterType.BEFORE_REDRAW, action);
             this._restack_id = id;
+        }
+    }
+
+    /**
+     * Places the border actor directly above its own window, then sinks it below
+     * any always-on-top windows and popup/transient children that share the window
+     * group. This is pure z-order bookkeeping — no layout, show/hide, or timers.
+     *
+     * Split out from restack() so it can also be re-run after Mutter finishes a
+     * restack. Mutter only orders real window actors and doesn't know about the
+     * foreign border actor, so a dropdown opened above the window can end up
+     * sandwiched between the window and the border (drawing the hint on top of the
+     * menu). Re-running this after `display`'s `restacked` signal always lands
+     * after Mutter is done, closing that race.
+     */
+    stack_border_above_window(actor: any, parent: any, border: any) {
+        if (border.get_parent() !== parent) {
+            if (border.get_parent()) {
+                border.get_parent()!.remove_child(border);
+            }
+            parent.add_child(border);
+        }
+
+        parent.set_child_above_sibling(border, actor);
+
+        for (const above_actor of (global as any).get_window_actors()) {
+            const meta = above_actor.get_meta_window();
+            if (!meta || !meta.is_above()) continue;
+            if (above_actor !== actor && above_actor.get_parent() === parent) {
+                parent.set_child_below_sibling(border, above_actor);
+                break;
+            }
+        }
+
+        const siblings: Array<any> = parent.get_children();
+        const candidates: Set<any> = new Set();
+
+        for (const window of this.ext.windows.values()) {
+            const trans_parent = window.meta.get_transient_for();
+            if (!trans_parent) continue;
+            const parent_actor = trans_parent.get_compositor_private() as any;
+            if (parent_actor !== actor) continue;
+            const window_actor = window.meta.get_compositor_private() as any;
+            if (window_actor && window_actor.get_parent() === parent) {
+                candidates.add(window_actor);
+            }
+        }
+
+        for (const popup_actor of (global as any).get_window_actors()) {
+            const wtype = popup_actor.get_meta_window()?.get_window_type();
+            if (
+                wtype === Meta.WindowType.DROPDOWN_MENU ||
+                wtype === Meta.WindowType.POPUP_MENU ||
+                wtype === Meta.WindowType.COMBO ||
+                wtype === Meta.WindowType.TOOLTIP
+            ) {
+                if (popup_actor.get_parent() === parent) {
+                    candidates.add(popup_actor);
+                }
+            }
+        }
+
+        if (candidates.size > 0) {
+            // Find the candidate with the lowest index among siblings (closest to bottom).
+            let lowest: any = null;
+            let lowest_idx = siblings.length;
+            for (const candidate of candidates) {
+                const idx = siblings.indexOf(candidate);
+                if (idx !== -1 && idx < lowest_idx) {
+                    lowest_idx = idx;
+                    lowest = candidate;
+                }
+            }
+            if (lowest !== null) {
+                parent.set_child_below_sibling(border, lowest);
+            }
         }
     }
 
