@@ -390,7 +390,7 @@
         </key>
 
         <key type="b" name="workspace-number-shortcuts">
-            <default>true</default>
+            <default>false</default>
             <summary>Switch to and move windows to workspaces with Super+1..9</summary>
         </key>
 

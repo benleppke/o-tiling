@@ -311,15 +311,15 @@ export class ExtensionSettings {
     }
 
     workspace_indicator_style(): string {
-        return this.ext.get_string(WORKSPACE_INDICATOR_STYLE) ?? 'numbers';
+        return this.ext.get_string(WORKSPACE_INDICATOR_STYLE);
     }
 
     workspace_indicator_active_style(): string {
-        return this.ext.get_string(WORKSPACE_INDICATOR_ACTIVE_STYLE) ?? 'pill';
+        return this.ext.get_string(WORKSPACE_INDICATOR_ACTIVE_STYLE);
     }
 
     workspace_indicator_position(): string {
-        return this.ext.get_string(WORKSPACE_INDICATOR_POSITION) ?? 'left';
+        return this.ext.get_string(WORKSPACE_INDICATOR_POSITION);
     }
 
     workspace_indicator_scroll(): boolean {
@@ -339,7 +339,7 @@ export class ExtensionSettings {
     }
 
     workspace_indicator_custom_labels(): string {
-        return this.ext.get_string(WORKSPACE_INDICATOR_CUSTOM_LABELS) ?? '';
+        return this.ext.get_string(WORKSPACE_INDICATOR_CUSTOM_LABELS);
     }
 
     workspace_indicator_border_radius(): number {
@@ -542,34 +542,6 @@ export class ExtensionSettings {
 
     set_workspace_number_indicator(set: boolean) {
         this.ext.set_boolean(WORKSPACE_NUMBER_INDICATOR, set);
-    }
-
-    set_workspace_indicator_style(val: string) {
-        this.ext.set_string(WORKSPACE_INDICATOR_STYLE, val);
-    }
-
-    set_workspace_indicator_active_style(val: string) {
-        this.ext.set_string(WORKSPACE_INDICATOR_ACTIVE_STYLE, val);
-    }
-
-    set_workspace_indicator_position(val: string) {
-        this.ext.set_string(WORKSPACE_INDICATOR_POSITION, val);
-    }
-
-    set_workspace_indicator_scroll(val: boolean) {
-        this.ext.set_boolean(WORKSPACE_INDICATOR_SCROLL, val);
-    }
-
-    set_workspace_indicator_show_empty(val: boolean) {
-        this.ext.set_boolean(WORKSPACE_INDICATOR_SHOW_EMPTY, val);
-    }
-
-    set_workspace_indicator_show_occupied(val: boolean) {
-        this.ext.set_boolean(WORKSPACE_INDICATOR_SHOW_OCCUPIED, val);
-    }
-
-    set_workspace_indicator_custom_labels(val: string) {
-        this.ext.set_string(WORKSPACE_INDICATOR_CUSTOM_LABELS, val);
     }
 
     set_workspace_indicator_border_radius(val: number) {

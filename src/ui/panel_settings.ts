@@ -427,12 +427,6 @@ function presets_row(ext: Ext): any {
 
 
 // ── WorkspaceNumberIndicator ──────────────────────────────────────────────────
-// A panel bar supporting Omarchy and Hyprland style workspace representations:
-// - Styles: Numbers (1, 2, 3), Hyprland expanding dots, Roman numerals, or Compact index ("2 / 4")
-// - Active styling: Pill (accent fill) or Outline (accent border)
-// - Occupied indicator: workspaces with open windows are visually distinguished
-// - Mouse wheel scrolling on indicator cycles through workspaces
-// - Custom workspace labels support and live settings reactivity
 
 function toRoman(num: number): string {
     const romanMap: [number, string][] = [
@@ -451,16 +445,10 @@ function toRoman(num: number): string {
 
 function isWorkspaceOccupied(ws: any): boolean {
     if (!ws) return false;
-    try {
-        const windows = ws.list_windows();
-        if (!windows || windows.length === 0) return false;
-        for (const win of windows) {
-            if (!win.is_on_all_workspaces?.() && !win.skip_taskbar) {
-                return true;
-            }
+    for (const win of ws.list_windows()) {
+        if (!win.is_on_all_workspaces?.() && !win.skip_taskbar) {
+            return true;
         }
-    } catch {
-        // Fallback
     }
     return false;
 }
@@ -468,10 +456,11 @@ function isWorkspaceOccupied(ws: any): boolean {
 export class WorkspaceNumberIndicator {
     readonly button: any; // PanelMenu.Button (required for addToStatusArea)
 
-    private _ext: any; // Ext reference for reading hint color & settings
+    private _ext: any; // Ext reference for reading hint color
     private _box: St.BoxLayout;
     private _ovBtn: St.Button | null = null;
     private _wsBtns: St.Button[] = [];
+    private _indexLabel: St.Label | null = null;
     private _settingsSignals: number[] = [];
     private _lastScrollTime = 0;
     private _lastSignature = '';
@@ -493,14 +482,12 @@ export class WorkspaceNumberIndicator {
         (this._box as any).set_orientation(Clutter.Orientation.HORIZONTAL);
         this.button.add_child(this._box);
 
-        // Mouse wheel scroll over the indicator to switch workspaces
         this.button.connect('scroll-event', (_actor: any, event: any) => this._onScroll(event));
 
         if (this._ext.settings.show_overview_button_in_indicator()) {
             this._createOverviewButton();
         }
 
-        // Mutter workspace and window signals
         const wm = (global as any).workspace_manager;
         wm.connectObject(
             'active-workspace-changed', () => this._update(),
@@ -519,7 +506,6 @@ export class WorkspaceNumberIndicator {
             );
         }
 
-        // Live settings reactivity: update immediately on settings change
         const s = this._ext.settings.ext;
         this._settingsSignals = [
             s.connect('changed::workspace-indicator-style', () => this._rebuild()),
@@ -642,13 +628,13 @@ export class WorkspaceNumberIndicator {
         ].join('|');
     }
 
-    /** Rebuilds the workspace buttons according to style and configuration. */
     private _rebuild(): void {
         for (const btn of this._wsBtns) {
             this._box.remove_child(btn);
             btn.destroy();
         }
         this._wsBtns = [];
+        this._indexLabel = null;
 
         const wm = (global as any).workspace_manager;
         const total: number = wm.get_n_workspaces();
@@ -670,7 +656,6 @@ export class WorkspaceNumberIndicator {
         const customLabelsStr: string = this._ext.settings.workspace_indicator_custom_labels().trim();
         const customLabels = customLabelsStr ? customLabelsStr.split(',').map(s => s.trim()) : [];
 
-        // 1. Compact index mode: "current / total"
         if (style === 'index') {
             const label = new St.Label({
                 text: `${current + 1} / ${total}`,
@@ -695,14 +680,12 @@ export class WorkspaceNumberIndicator {
                     Main.overview.show();
                 }
             });
-            (btn as any)._wsIndex = current;
-            (btn as any)._label = label;
+            this._indexLabel = label;
             this._box.add_child(btn);
             this._wsBtns.push(btn);
             return;
         }
 
-        // 2. Dots mode (Hyprland expanding dots)
         if (style === 'dots') {
             for (let i = 0; i < total; i++) {
                 const idx = i;
@@ -717,7 +700,6 @@ export class WorkspaceNumberIndicator {
                     style_class: 'o-tiling-ws-dot',
                     y_align: Clutter.ActorAlign.CENTER,
                 });
-                (btn as any)._wsIndex = idx;
 
                 if (idx === current) {
                     btn.add_style_class_name('o-tiling-ws-dot-active');
@@ -745,7 +727,6 @@ export class WorkspaceNumberIndicator {
             return;
         }
 
-        // 3. Numbers / Roman / Custom labels mode
         for (let i = 0; i < total; i++) {
             const idx = i;
             const ws = wm.get_workspace_by_index(idx);
@@ -773,8 +754,6 @@ export class WorkspaceNumberIndicator {
                 child: label,
                 y_align: Clutter.ActorAlign.CENTER,
             });
-            (btn as any)._wsIndex = idx;
-            (btn as any)._label = label;
 
             if (idx === current) {
                 btn.add_style_class_name('o-tiling-ws-btn-active');
@@ -803,7 +782,6 @@ export class WorkspaceNumberIndicator {
         }
     }
 
-    /** Updates button active-state and occupied-state styles without full rebuild when possible. */
     private _update(): void {
         const style: string = this._ext.settings.workspace_indicator_style();
 
@@ -827,14 +805,13 @@ export class WorkspaceNumberIndicator {
         const showEmpty: boolean = this._ext.settings.workspace_indicator_show_empty();
         const showOccupied: boolean = this._ext.settings.workspace_indicator_show_occupied();
 
-        // 1. Index mode update — the "2 / 4" pill is independent of occupancy
         if (style === 'index') {
             const btn = this._wsBtns[0];
-            if (!btn || (btn as any)._label === undefined) {
+            if (!btn || !this._indexLabel) {
                 this._rebuild();
                 return;
             }
-            (btn as any)._label.text = `${current + 1} / ${total}`;
+            this._indexLabel.text = `${current + 1} / ${total}`;
             if (activeStyle === 'pill') {
                 btn.remove_style_class_name('o-tiling-ws-btn-active-outline');
                 btn.add_style_class_name('o-tiling-ws-btn-active-pill');
@@ -859,11 +836,10 @@ export class WorkspaceNumberIndicator {
             return;
         }
 
-        // 2. Dots mode update
         if (style === 'dots') {
             for (let i = 0; i < this._wsBtns.length; i++) {
                 const btn = this._wsBtns[i];
-                const idx = (btn as any)._wsIndex ?? i;
+                const idx = i;
                 const ws = wm.get_workspace_by_index(idx);
                 const occupied = isWorkspaceOccupied(ws);
 
@@ -890,10 +866,9 @@ export class WorkspaceNumberIndicator {
             return;
         }
 
-        // 3. Numbers / Roman / Custom labels update
         for (let i = 0; i < this._wsBtns.length; i++) {
             const btn = this._wsBtns[i];
-            const idx = (btn as any)._wsIndex ?? i;
+            const idx = i;
             const ws = wm.get_workspace_by_index(idx);
             const occupied = isWorkspaceOccupied(ws);
 
@@ -934,6 +909,7 @@ export class WorkspaceNumberIndicator {
 
         for (const btn of this._wsBtns) btn.destroy();
         this._wsBtns = [];
+        this._indexLabel = null;
         this._ovBtn?.destroy();
         this._ovBtn = null;
 
