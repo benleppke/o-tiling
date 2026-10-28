@@ -1,6 +1,6 @@
 # Contributing to O-tiling
 
-Thanks for wanting to help. O-tiling is a small, free GNOME Shell extension, and it is maintained by one person in their spare time. A few simple rules keep the project healthy and keep reviews fast for everyone.
+Thanks for wanting to help. O-tiling is Auto Tiling GNOME Shell extension, and it is maintained by one person in their spare time. A few simple rules keep the project healthy and keep reviews fast for everyone.
 
 **The short version:** open an issue first, keep your PR small, test it on a real GNOME session, and understand every line you submit.
 
